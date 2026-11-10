@@ -710,7 +710,6 @@
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
 
-    // প্রতিটি প্ল্যানের নির্দিষ্ট টাস্ক সংখ্যা (taskCount) এবং অন্যান্য তথ্য
     const allPlansData = [
         { name: 'স্টার্টার প্ল্যান', price: 60, totalIncome: 80, days: 10, taskCount: 3, badge: 'শুরু', badgeColor: 'var(--primary)', borderColor: 'var(--border)' },
         { name: 'ব্রোঞ্জ প্ল্যান', price: 100, totalIncome: 150, days: 12, taskCount: 4, badge: 'লেভেল ১', badgeColor: 'var(--primary)', borderColor: 'var(--border)' },
@@ -731,14 +730,14 @@
 
     let currentUserId = localStorage.getItem('rm_current_uid') || null;
     let userData = {
-        name: "সাকিব খান",
+        name: "",
         phone: "",
         uid: "",
         balance: 0.00,
         todayEarn: 0.00,
         plan: null,          
         planDailyIncome: 0,
-        planTaskCount: 5, // ডিফল্ট টাস্ক সংখ্যা
+        planTaskCount: 5,
         hasPurchasedPlan: false, 
         referCount: 0,
         totalWithdrawCount: 0,
@@ -820,6 +819,7 @@
         const name = document.getElementById('reg-name').value;
         const phone = document.getElementById('reg-phone').value;
         const pass = document.getElementById('reg-pass').value;
+        const referredBy = document.getElementById('reg-ref').value.trim();
         const dbRef = ref(db);
 
         try {
@@ -844,10 +844,25 @@
                 referCount: 0,
                 totalWithdrawCount: 0,
                 lastTaskDate: getTodayString(),
-                completedTasks: []
+                completedTasks: [],
+                referredBy: referredBy || ""
             };
 
             await set(ref(db, 'users/' + phone), userData);
+
+            // যদি রিফারেল কোড বা রেফারার নম্বর দেওয়া থাকে এবং ডেটাবেজে সেই ব্যবহারকারী থাকে
+            if (referredBy) {
+                const refSnapshot = await get(child(dbRef, `users/${referredBy}`));
+                if (refSnapshot.exists()) {
+                    let refUserData = refSnapshot.val();
+                    // যদি রেফারারের প্ল্যান কেনা থাকে তবেই কাউন্ট বাড়বে
+                    if (refUserData.hasPurchasedPlan) {
+                        refUserData.referCount = (refUserData.referCount || 0) + 1;
+                        await update(ref(db, `users/${referredBy}`), { referCount: refUserData.referCount });
+                    }
+                }
+            }
+
             currentUserId = phone;
             localStorage.setItem('rm_current_uid', phone);
 
@@ -905,10 +920,12 @@
         document.getElementById('edit-name').value = userData.name;
         document.getElementById('edit-phone').value = userData.phone;
 
-        document.getElementById('ref-link-text').innerText = `https://rewardapp.com/ref?code=${userData.phone ? userData.phone.slice(-4) : 'USER'}`;
+        // ডোমেনসহ সঠিক রেফারেল লিংক তৈরি যা ক্লিক করলে সরাসরি রেজিস্ট্রেশন পেজ বা কোড পাবে
+        const currentUrl = window.location.href.split('?')[0];
+        const userRefCode = userData.phone || '';
+        document.getElementById('ref-link-text').innerText = `${currentUrl}?ref=${userRefCode}`;
         document.getElementById('ref-count').innerText = `${userData.referCount || 0} জন`;
 
-        // Update Withdraw Notice dynamically based on withdrawal count
         const noticeDiv = document.getElementById('withdraw-notice');
         if (userData.totalWithdrawCount === 0) {
             noticeDiv.innerHTML = `ℹ️ প্রথম উইথড্র সর্বনিম্ন <strong>৩০ টাকা</strong>।`;
@@ -928,11 +945,9 @@
         allPlansData.forEach(p => {
             const isCurrentActive = userData.plan === p.name;
             let btnHtml = '';
-
             const dailyInc = p.totalIncome / p.days;
 
             if (isCurrentActive) {
-                // বর্তমান সক্রিয় প্ল্যান হলে দেখাবে
                 btnHtml = `<button class="submit-btn" style="background: #334155; color: var(--secondary); cursor: not-allowed; border: 1px solid var(--secondary);" disabled><i class="fa-solid fa-check-circle"></i> চলমান প্ল্যান (সক্রিয়)</button>`;
             } else {
                 let btnBg = p.badgeColor === 'var(--primary)' ? 'var(--primary)' : (p.badgeColor === 'var(--secondary)' ? 'var(--secondary)' : (p.badgeColor === 'var(--accent)' ? 'var(--accent)' : '#ec4899'));
@@ -1051,7 +1066,6 @@
         }, 1000);
     }
 
-    // নতুন প্ল্যান কেনার ফাংশন যেখানে আগের প্ল্যান অটো আনঅ্যাক্টিভ ও টাস্ক রিসেট হবে
     window.buyPlan = async function(planName, price, dailyIncome, taskCount) {
         if (userData.plan === planName) {
             showToast("আপনি ইতিমধ্যে এই প্ল্যানটি কিনেছেন!", false);
@@ -1064,12 +1078,11 @@
         }
 
         userData.balance -= price;
-        userData.plan = planName;                    // নতুন প্ল্যান সেট হলো (আগেরটি ওভাররাইট হয়ে গেল)
+        userData.plan = planName;                    
         userData.planDailyIncome = dailyIncome;
-        userData.planTaskCount = taskCount;          // নতুন প্ল্যানের টাস্ক সংখ্যা সেট হলো
+        userData.planTaskCount = taskCount;          
         userData.hasPurchasedPlan = true; 
-        userData.referCount = (userData.referCount || 0) + 1; 
-        userData.completedTasks = [];                // নতুন প্ল্যানের জন্য টাস্ক লিস্ট রিসেট
+        userData.completedTasks = [];                
         userData.lastTaskDate = getTodayString();
         
         await saveUserData(); 
@@ -1269,6 +1282,19 @@
     }
 
     window.addEventListener('load', async () => {
+        // ইউআরএল থেকে রেফারেল কোড চেক করা (যেমন: ?ref=017XXXXXXXX)
+        const urlParams = new URLSearchParams(window.location.search);
+        const refCodeFromUrl = urlParams.get('ref');
+        
+        if (refCodeFromUrl) {
+            toggleAuthTab('register');
+            const refInput = document.getElementById('reg-ref');
+            if (refInput) {
+                refInput.value = refCodeFromUrl;
+                refInput.readOnly = true; // যাতে কেউ পরিবর্তন করতে না পারে
+            }
+        }
+
         if (currentUserId) {
             try {
                 const snapshot = await get(child(ref(db), `users/${currentUserId}`));
